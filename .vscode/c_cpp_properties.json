@@ -6,7 +6,8 @@
                 "/Users/vincevannoort/Library/Arduino15/packages/esp8266/hardware/esp8266/2.4.0/cores/esp8266",
                 "/Applications/Arduino.app/Contents/Java/hardware/arduino/avr/cores/arduino",
                 "/Users/vincevannoort/Documents/Arduino/libraries/Adafruit_SSD1306",
-                "/Users/vincevannoort/Documents/Arduino/libraries/Adafruit_GFX_Library"
+                "/Users/vincevannoort/Documents/Arduino/libraries/Adafruit_GFX_Library",
+                "/Users/vincevannoort/Documents/Arduino/libraries/ESP8266_and_ESP32_Oled_Driver_for_SSD1306_display/src"
             ],
             "browse": {
                 "limitSymbolsToIncludedHeaders": false,
@@ -14,7 +15,8 @@
                     "/Users/vincevannoort/Library/Arduino15/packages/esp8266/hardware/esp8266/2.4.0/cores/esp8266",
                     "/Applications/Arduino.app/Contents/Java/hardware/arduino/avr/cores/arduino",
                     "/Users/vincevannoort/Documents/Arduino/libraries/Adafruit_SSD1306",
-                    "/Users/vincevannoort/Documents/Arduino/libraries/Adafruit_GFX_Library"
+                    "/Users/vincevannoort/Documents/Arduino/libraries/Adafruit_GFX_Library",
+                    "/Users/vincevannoort/Documents/Arduino/libraries/ESP8266_and_ESP32_Oled_Driver_for_SSD1306_display/src"
                 ]
             },
             "intelliSenseMode": "clang-x64",
