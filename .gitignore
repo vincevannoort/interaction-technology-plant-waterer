@@ -1,6 +1,9 @@
 # VScode
 .vscode
 
+# Env file
+env-variables.h
+
 # Prerequisites
 *.d
 
