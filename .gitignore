@@ -4,6 +4,9 @@
 # Env file
 env-variables.h
 
+# Mac file
+.DS_Store
+
 # Prerequisites
 *.d
 
