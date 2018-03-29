@@ -9,9 +9,27 @@
 #include <Adafruit_MQTT_Client.h>
 WiFiClientSecure client;
 Adafruit_MQTT_Client mqtt(&client, AIO_SERVER, AIO_SERVERPORT, AIO_USERNAME, AIO_KEY); 
+
+// BME280
+#include <Wire.h>
+#include <Adafruit_Sensor.h>
+#include <Adafruit_BME280.h>
+Adafruit_BME280 bme;
+
+/**
+ * Publishers
+ */
 Adafruit_MQTT_Publish soil_moisture_publisher = Adafruit_MQTT_Publish(&mqtt, "plant/treeminator/soil-moisture");
 Adafruit_MQTT_Publish light_publisher = Adafruit_MQTT_Publish(&mqtt, "plant/treeminator/light");
+Adafruit_MQTT_Publish pressure_publisher = Adafruit_MQTT_Publish(&mqtt, "plant/treeminator/pressure");
+Adafruit_MQTT_Publish temperature_publisher = Adafruit_MQTT_Publish(&mqtt, "plant/treeminator/temperature");
+Adafruit_MQTT_Publish humidity_publisher = Adafruit_MQTT_Publish(&mqtt, "plant/treeminator/humidity");
+
+/**
+ * Subscribers
+ */
 Adafruit_MQTT_Subscribe plant_sensor_wildcard_subscriber = Adafruit_MQTT_Subscribe(&mqtt, "plant/treeminator/give-water");
+
 uint32_t x = 0;
 void MQTT_connect();
 
@@ -19,6 +37,8 @@ void MQTT_connect();
 int PIN_MULTIPLEXER = D2;
 int PIN_SOIL_MOISTURE = A0;
 int PIN_LIGHT = A0;
+int PIN_SDA = D6;
+int PIN_SCL = D7;
 
 /**
  * Soil Moisture sensor
@@ -126,6 +146,13 @@ void setup() {
   pinMode(LED_BUILTIN, OUTPUT);
   // Analog pin for light sensor and soil moisture sensor
   pinMode(A0, INPUT);
+
+  // Setup wire protocol
+  Wire.begin(PIN_SDA, PIN_SCL);
+  if (!bme.begin(&Wire)) {
+      Serial.println("Could not find a valid BME280 sensor, check wiring!");
+      while (1);
+  }
 }
 
 void loop() {
@@ -142,6 +169,9 @@ void loop() {
   // publish found values to mqtt broker
   outside_connection::publish(soil_moisture_publisher, soil_moisture_sensor::read());
   outside_connection::publish(light_publisher, light_sensor::read());
+  outside_connection::publish(pressure_publisher, bme.readPressure());
+  outside_connection::publish(temperature_publisher, bme.readTemperature());
+  outside_connection::publish(humidity_publisher, bme.readHumidity());
   delay(100);
 
   outside_connection::check_subscription();
