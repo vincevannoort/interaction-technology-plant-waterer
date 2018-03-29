@@ -8,9 +8,10 @@
 #include <Adafruit_MQTT.h>
 #include <Adafruit_MQTT_Client.h>
 WiFiClientSecure client;
-Adafruit_MQTT_Client mqtt(&client, AIO_SERVER, AIO_SERVERPORT, AIO_USERNAME, AIO_KEY);
-Adafruit_MQTT_Publish photocell = Adafruit_MQTT_Publish(&mqtt, "/plant/treeminator");
-Adafruit_MQTT_Subscribe onoffbutton = Adafruit_MQTT_Subscribe(&mqtt, "/plant/treeminator");
+Adafruit_MQTT_Client mqtt(&client, AIO_SERVER, AIO_SERVERPORT, AIO_USERNAME, AIO_KEY); 
+Adafruit_MQTT_Publish soil_moisture_publisher = Adafruit_MQTT_Publish(&mqtt, "plant/treeminator/soil-moisture");
+Adafruit_MQTT_Publish light_publisher = Adafruit_MQTT_Publish(&mqtt, "plant/treeminator/light");
+Adafruit_MQTT_Subscribe plant_sensor_wildcard_subscriber = Adafruit_MQTT_Subscribe(&mqtt, "plant/treeminator/give-water");
 uint32_t x = 0;
 void MQTT_connect();
 
@@ -74,7 +75,7 @@ class outside_connection {
     Serial.println();
     Serial.println("WiFi connected");
     Serial.println("IP address: "); Serial.println(WiFi.localIP());
-    mqtt.subscribe(&onoffbutton);
+    mqtt.subscribe(&plant_sensor_wildcard_subscriber);
   }
 
   static void connect_mqtt() {
@@ -101,19 +102,17 @@ class outside_connection {
 
   static void check_subscription() {
     Adafruit_MQTT_Subscribe *subscription;
-    while ((subscription = mqtt.readSubscription(5000))) {
-      if (subscription == &onoffbutton) {
+    while ((subscription = mqtt.readSubscription(100))) {
+      if (subscription == &plant_sensor_wildcard_subscriber) {
         Serial.print("Got: ");
-        Serial.println((char *)onoffbutton.lastread);
+        Serial.println((char *)plant_sensor_wildcard_subscriber.lastread);
       }
     }
   }
 
-  static void publish(Adafruit_MQTT_Publish publisher) {
-    if (! publisher.publish(0)) {
-      Serial.println("Failed");
-    } else {
-      Serial.println("OK!");
+  static void publish(Adafruit_MQTT_Publish publisher, int value) {
+    if (! publisher.publish(value)) {
+      Serial.println("Sending to broker failed.");
     }
   }
 };
@@ -140,13 +139,10 @@ void loop() {
   outside_connection::connect_internet();
   outside_connection::connect_mqtt();
 
-  // outside_connection::check_subscription();
-  outside_connection::publish(photocell);
-  delay(500);
+  // publish found values to mqtt broker
+  outside_connection::publish(soil_moisture_publisher, soil_moisture_sensor::read());
+  outside_connection::publish(light_publisher, light_sensor::read());
+  delay(100);
 
-  Serial.print("soil_moisture_sensor: ");
-  Serial.println(soil_moisture_sensor::read());
-  Serial.print("light_sensor: ");
-  Serial.println(light_sensor::read());
-  // outside_connection::publish(photocell);
+  outside_connection::check_subscription();
 }
