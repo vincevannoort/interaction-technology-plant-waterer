@@ -1,6 +1,7 @@
 #include "env-variables.h"
 
 // OLED
+#include <Wire.h>
 #include <SSD1306Wire.h>
 
 // WIFI AND MQTT
@@ -11,10 +12,12 @@ WiFiClientSecure client;
 Adafruit_MQTT_Client mqtt(&client, AIO_SERVER, AIO_SERVERPORT, AIO_USERNAME, AIO_KEY); 
 
 // BME280
-#include <Wire.h>
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BME280.h>
 Adafruit_BME280 bme;
+
+// Watering system
+#include <Servo.h>
 
 /**
  * Publishers
@@ -75,8 +78,42 @@ class oled_display {
     ssd1306_oled_display.flipScreenVertically();
     ssd1306_oled_display.setFont(ArialMT_Plain_10);
   }
+  static void show() {
+    ssd1306_oled_display.clear();
+    ssd1306_oled_display.setTextAlignment(TEXT_ALIGN_CENTER_BOTH);
+    ssd1306_oled_display.drawString(64, 32, "status: analysing");
+    ssd1306_oled_display.display();
+  }
 };
 
+/**
+ * Watering system
+ */
+Servo watering_servo;
+class watering_system {
+  public:
+  static int position;
+  static void go_to(int value) {
+    watering_servo.write(value);
+    if (value != position) {
+      Serial.print("moving to: ");
+      Serial.println(value);
+      watering_servo.write(value);
+      watering_system::position = value;
+    }
+  }
+  static void go_to_rest_position() {
+    watering_system::go_to(0);
+  }
+  static void go_to_watering_position() {
+    watering_system::go_to(130);
+  }
+};
+int watering_system::position = 0;
+
+/**
+ * Outside connection
+ */
 class outside_connection {
   public:
   static void connect_internet() {
@@ -124,8 +161,7 @@ class outside_connection {
     Adafruit_MQTT_Subscribe *subscription;
     while ((subscription = mqtt.readSubscription(100))) {
       if (subscription == &plant_sensor_wildcard_subscriber) {
-        Serial.print("Got: ");
-        Serial.println((char *)plant_sensor_wildcard_subscriber.lastread);
+        watering_system::go_to(String((char *)plant_sensor_wildcard_subscriber.lastread).toInt());
       }
     }
   }
@@ -146,7 +182,8 @@ void setup() {
   pinMode(LED_BUILTIN, OUTPUT);
   // Analog pin for light sensor and soil moisture sensor
   pinMode(A0, INPUT);
-
+  // Set pin for watering system
+  watering_servo.attach(D8);
   // Setup wire protocol
   Wire.begin(PIN_SDA, PIN_SCL);
   if (!bme.begin(&Wire)) {
@@ -156,11 +193,7 @@ void setup() {
 }
 
 void loop() {
-  ssd1306_oled_display.clear();
-  ssd1306_oled_display.setTextAlignment(TEXT_ALIGN_CENTER_BOTH);
-  ssd1306_oled_display.setFont(ArialMT_Plain_16);
-  ssd1306_oled_display.drawString(64, 32, "status: analysing");
-  ssd1306_oled_display.display();
+  oled_display::show();
 
   // connect mqtt and wifi
   outside_connection::connect_internet();
