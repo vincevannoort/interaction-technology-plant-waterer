@@ -167,6 +167,12 @@ class outside_connection {
       }
       if (subscription == &gesture_subscriber) {
         Serial.println("Recieved gesture");
+        int finger_count = ((char *)gesture_subscriber.lastread)[10] - '0';
+        if (finger_count == 2) {
+          watering_system::go_to(130);
+        } else {
+          watering_system::go_to(0);
+        }
       }
     }
   }
@@ -189,12 +195,15 @@ void setup() {
   pinMode(A0, INPUT);
   // Set pin for watering system
   watering_servo.attach(D8);
+  watering_servo.write(0);
   // Setup wire protocol
   Wire.begin(PIN_SDA, PIN_SCL);
   if (!bme.begin(&Wire)) {
       Serial.println("Could not find a valid BME280 sensor, check wiring!");
       while (1);
   }
+  // Set initial state
+  // watering_system::go_to(0);
 }
 
 void loop() {
