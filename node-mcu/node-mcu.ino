@@ -22,16 +22,17 @@ Adafruit_BME280 bme;
 /**
  * Publishers
  */
-Adafruit_MQTT_Publish soil_moisture_publisher = Adafruit_MQTT_Publish(&mqtt, "plant/treeminator/soil-moisture");
-Adafruit_MQTT_Publish light_publisher = Adafruit_MQTT_Publish(&mqtt, "plant/treeminator/light");
-Adafruit_MQTT_Publish pressure_publisher = Adafruit_MQTT_Publish(&mqtt, "plant/treeminator/pressure");
-Adafruit_MQTT_Publish temperature_publisher = Adafruit_MQTT_Publish(&mqtt, "plant/treeminator/temperature");
-Adafruit_MQTT_Publish humidity_publisher = Adafruit_MQTT_Publish(&mqtt, "plant/treeminator/humidity");
+Adafruit_MQTT_Publish soil_moisture_publisher = Adafruit_MQTT_Publish(&mqtt, "plant/treeminator/soil-moisture", 0);
+Adafruit_MQTT_Publish light_publisher = Adafruit_MQTT_Publish(&mqtt, "plant/treeminator/light", 0);
+Adafruit_MQTT_Publish pressure_publisher = Adafruit_MQTT_Publish(&mqtt, "plant/treeminator/pressure", 0);
+Adafruit_MQTT_Publish temperature_publisher = Adafruit_MQTT_Publish(&mqtt, "plant/treeminator/temperature", 0);
+Adafruit_MQTT_Publish humidity_publisher = Adafruit_MQTT_Publish(&mqtt, "plant/treeminator/humidity", 0);
 
 /**
  * Subscribers
  */
-Adafruit_MQTT_Subscribe plant_sensor_wildcard_subscriber = Adafruit_MQTT_Subscribe(&mqtt, "plant/treeminator/give-water");
+Adafruit_MQTT_Subscribe button_subscriber = Adafruit_MQTT_Subscribe(&mqtt, "plant/treeminator/give-water", 0);
+Adafruit_MQTT_Subscribe gesture_subscriber = Adafruit_MQTT_Subscribe(&mqtt, "plant/treeminator/gesture", 0);
 
 uint32_t x = 0;
 void MQTT_connect();
@@ -132,7 +133,8 @@ class outside_connection {
     Serial.println();
     Serial.println("WiFi connected");
     Serial.println("IP address: "); Serial.println(WiFi.localIP());
-    mqtt.subscribe(&plant_sensor_wildcard_subscriber);
+    mqtt.subscribe(&button_subscriber);
+    mqtt.subscribe(&gesture_subscriber);
   }
 
   static void connect_mqtt() {
@@ -159,9 +161,12 @@ class outside_connection {
 
   static void check_subscription() {
     Adafruit_MQTT_Subscribe *subscription;
-    while ((subscription = mqtt.readSubscription(100))) {
-      if (subscription == &plant_sensor_wildcard_subscriber) {
-        watering_system::go_to(String((char *)plant_sensor_wildcard_subscriber.lastread).toInt());
+    while ((subscription = mqtt.readSubscription(2500))) {
+      if (subscription == &button_subscriber) {
+        watering_system::go_to(String((char *)button_subscriber.lastread).toInt());
+      }
+      if (subscription == &gesture_subscriber) {
+        Serial.println("Recieved gesture");
       }
     }
   }
