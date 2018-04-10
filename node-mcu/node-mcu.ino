@@ -1,12 +1,14 @@
 #include "env-variables.h"
 
+// EEPROM
+#include <EEPROM.h>
+
 // Bounce
 #include <Bounce2.h>
 
 // Timer
 #include <SimpleTimer.h>
 SimpleTimer publish_sensor_values_timer;
-SimpleTimer check_enough_water_timer;
 
 // OLED
 #include <Wire.h>
@@ -26,11 +28,14 @@ Adafruit_MQTT_Client mqtt(&client, AIO_SERVER, AIO_SERVERPORT, AIO_USERNAME, AIO
 // NTP client
 #include <NTPClient.h>
 WiFiUDP ntpUDP;
-NTPClient timeClient(ntpUDP, "nl.pool.ntp.org");
+NTPClient timeClient(ntpUDP, "ntp.cs.uu.nl"); // UU FOR THE WIN!
 
 // Time
 #include <Time.h>
 #include <TimeLib.h>
+time_t last_time_water_given;
+time_t time_passed_since_last_time_water_given;
+int eeprom_last_time_water_given_address = 0;
 
 // BME280
 #include <Adafruit_Sensor.h>
@@ -77,18 +82,6 @@ Bounce system_status_switch = Bounce();
 /**
  * Soil Moisture sensor
  */
-class soil_moisture_sensor {
-  public:
-  static int read() {
-    // set multiplexer board to HIGH
-    digitalWrite(PIN_MULTIPLEXER, HIGH);
-    return analogRead(PIN_SOIL_MOISTURE);
-  }
-};
-
-/**
- * Soil Moisture sensor
- */
 class light_sensor {
   public:
   static int read() {
@@ -101,22 +94,13 @@ class light_sensor {
 /**
  * OLED display
  */
+int global_soil_moisture = 0;
+int global_light = 0;
+int global_pressure = 0;
+int global_temperature = 0;
+int global_humidity = 0;
 SSD1306Wire ssd1306_oled_display(0x3c, D6, D7);
 OLEDDisplayUi ssd1306_oled_display_ui(&ssd1306_oled_display);
-class oled_display {
-  public:
-  static void initialize() {
-    // ssd1306_oled_display.init();
-    ssd1306_oled_display.flipScreenVertically();
-    // ssd1306_oled_display.setFont(ArialMT_Plain_10);
-  }
-  static void show() {
-    ssd1306_oled_display.clear();
-    ssd1306_oled_display.setTextAlignment(TEXT_ALIGN_CENTER_BOTH);
-    ssd1306_oled_display.drawString(64, 32, "status: analysing");
-    ssd1306_oled_display.display();
-  }
-};
 
 /**
  * Watering system
@@ -130,26 +114,62 @@ class watering_system {
     if (value != position) {
       watering_servo.write(value);
       watering_system::position = value;
+      if (value >= 130) {
+        last_time_water_given = now();
+        EEPROM.put(eeprom_last_time_water_given_address, last_time_water_given);
+        EEPROM.commit();
+      }
     }
   }
   static void go_to_rest_position() {
-    watering_system::go_to(0);
+    if (now() - last_time_water_given > 1) {
+      watering_system::go_to(0);
+    }
   }
   static void go_to_watering_position() {
-    watering_system::go_to(130);
+    if (now() - last_time_water_given > 5) {
+      watering_system::go_to(130);
+    }
   }
-  static void has_enought_water() {
+  static void has_enough_water(int moisture_level) {
+    // if the mode is not automatic, it should not do anything
     if (current_system_status != system_status::automatic) {
       return;
     }
-    if (soil_moisture_sensor::read() < 50) {
+    if (moisture_level < 80) {
+      Serial.println("Under moisture level...");
       watering_system::go_to_watering_position();
     } else {
+      Serial.println("Above moisture level...");
       watering_system::go_to_rest_position();
     }
   }
 };
 int watering_system::position = 0;
+
+/**
+ * Soil Moisture sensor
+ */
+class soil_moisture_sensor {
+  public:
+  static int read_once() {
+    digitalWrite(PIN_MULTIPLEXER, HIGH);
+    int value = analogRead(PIN_SOIL_MOISTURE);
+    return value;
+  }
+  static int read() {
+    // set multiplexer board to HIGH
+    int total = 0;
+    int total_readings = 5;
+
+    for(int i = 0; i <= total_readings; i++) {
+      total += soil_moisture_sensor::read_once();
+      delay(10);
+    }
+    watering_system::has_enough_water(total / total_readings);
+    return total / total_readings;
+  }
+};
 
 /**
  * System status LED
@@ -247,6 +267,11 @@ class outside_connection {
   }
 
   static void publish_sensor_values() {
+    global_soil_moisture = soil_moisture_sensor::read();
+    global_light = light_sensor::read();
+    global_pressure = bme.readPressure() / 1000;
+    global_temperature = bme.readTemperature();
+    global_humidity = bme.readHumidity();
     outside_connection::publish(soil_moisture_publisher, soil_moisture_sensor::read());
     outside_connection::publish(light_publisher, light_sensor::read());
     outside_connection::publish(pressure_publisher, bme.readPressure() / 1000);
@@ -265,18 +290,32 @@ class outside_connection {
  * UI frames
  */
 void screen_test1(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y) {
-  // Demonstrates the 3 included default sizes. The fonts come from SSD1306Fonts.h file
-  // Besides the default fonts there will be a program to convert TrueType fonts into this format
   display->setTextAlignment(TEXT_ALIGN_LEFT);
   display->setFont(ArialMT_Plain_10);
-  display->drawString(0 + x, 10 + y, "screen one");
+  display->drawString(15 + 5 + x, 0 + y,   "moisture:");
+  display->drawString(15 + 75 + x, 0 + y,  String(global_soil_moisture));
+  display->drawString(15 + 5 + x, 10 + y,  "light:");
+  display->drawString(15 + 75 + x, 10 + y, String(global_light));
+  display->drawString(15 + 5 + x, 20 + y,  "pressure:");
+  display->drawString(15 + 75 + x, 20 + y, String(global_pressure));
+  display->drawString(15 + 5 + x, 30 + y,  "temperature:");
+  display->drawString(15 + 75 + x, 30 + y, String(global_temperature));
+  display->drawString(15 + 5 + x, 40 + y,  "humidity:");
+  display->drawString(15 + 75 + x, 40 + y, String(global_humidity));
 }
 void screen_test2(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y) {
-  // Demonstrates the 3 included default sizes. The fonts come from SSD1306Fonts.h file
-  // Besides the default fonts there will be a program to convert TrueType fonts into this format
-  display->setTextAlignment(TEXT_ALIGN_LEFT);
+  display->setTextAlignment(TEXT_ALIGN_CENTER);
   display->setFont(ArialMT_Plain_10);
-  display->drawString(0 + x, 10 + y, "screen two");
+  time_passed_since_last_time_water_given = now() - last_time_water_given;
+  display->drawString(64 + x, 8 + y, "time passed");
+  display->drawString(64 + x, 18 + y, "since last watering:");
+  int i_hour = hour(time_passed_since_last_time_water_given);
+  String s_hour = (i_hour < 10) ? "0" + String(i_hour) : String(i_hour);
+  int i_minute = minute(time_passed_since_last_time_water_given);
+  String s_minute = (i_minute < 10) ? "0" + String(i_minute) : String(i_minute);
+  int i_second = second(time_passed_since_last_time_water_given);
+  String s_second = (i_second < 10) ? "0" + String(i_second) : String(i_second);
+  display->drawString(64 + x, 36 + y, s_hour + ":" + s_minute + ":" + s_second);
 }
 FrameCallback frames[] = { screen_test1, screen_test2 };
 int frames_length = 2;
@@ -302,6 +341,9 @@ const uint8_t inactiveSymbol[] PROGMEM = {
     B00000000
 };
 
+/**
+ * Setup
+ */
 void setup() {
   Serial.begin(115200);
   // flash button
@@ -309,7 +351,6 @@ void setup() {
   system_status_switch.attach(D3);
   system_status_switch.interval(5);
   // Initialise oled screen
-  oled_display::initialize();
   ssd1306_oled_display_ui.setTargetFPS(60);
   ssd1306_oled_display_ui.setActiveSymbol(activeSymbol);
   ssd1306_oled_display_ui.setInactiveSymbol(inactiveSymbol);
@@ -317,10 +358,11 @@ void setup() {
   ssd1306_oled_display_ui.setIndicatorDirection(LEFT_RIGHT);
   ssd1306_oled_display_ui.setFrameAnimation(SLIDE_LEFT);
   ssd1306_oled_display_ui.setFrames(frames, frames_length);
-  ssd1306_oled_display_ui.setTimePerFrame(3000);
-  ssd1306_oled_display_ui.setTimePerTransition(1000);
+  ssd1306_oled_display_ui.setTimePerFrame(2000);
+  ssd1306_oled_display_ui.setTimePerTransition(0);
   ssd1306_oled_display_ui.enableAutoTransition();
   ssd1306_oled_display_ui.init();
+  ssd1306_oled_display.flipScreenVertically();
   // Set pin mode for multiplexer pin
   pinMode(PIN_MULTIPLEXER, OUTPUT);
   // Set pin mode for onboard led
@@ -336,30 +378,35 @@ void setup() {
       Serial.println("Could not find a valid BME280 sensor, check wiring!");
       while (1);
   }
+  // EEPROM
+  EEPROM.begin(512);
+  EEPROM.get(eeprom_last_time_water_given_address, last_time_water_given);
   // Set timer for publishing values
-  publish_sensor_values_timer.setInterval(250, outside_connection::publish_sensor_values);
-  check_enough_water_timer.setInterval(2500, watering_system::has_enought_water);
+  publish_sensor_values_timer.setInterval(500, outside_connection::publish_sensor_values);
   // connect mqtt and wifi
   outside_connection::connect_internet();
   outside_connection::connect_mqtt();
   // Set time from NTP library
   timeClient.begin();
+  timeClient.update();
+  setTime(timeClient.getEpochTime());
 }
 
+/**
+ * Loop
+ */
 void loop() {
   // connect mqtt and wifi
   outside_connection::connect_internet();
   outside_connection::connect_mqtt();
 
-  // timeClient.update();
-  // Serial.println(timeClient.getFormattedTime());
-
+  // update the oled ui
   ssd1306_oled_display_ui.update();
   system_status_led::display_current_status();
 
   // publish found values to mqtt broker
   publish_sensor_values_timer.run();
-  check_enough_water_timer.run();
 
+  // check if there are any new values from subscriptions
   outside_connection::check_subscription();
 }

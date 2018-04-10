@@ -6,6 +6,9 @@ env-variables.h
 
 # Build path
 build
+
+# Movie files
+.avi
  
 # Mac file
 .DS_Store

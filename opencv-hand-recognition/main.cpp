@@ -309,8 +309,7 @@ int main(){
 	HandGesture hg;
 	init(&m);		
 	m.cap >>m.src;
-    namedWindow("img1",CV_WINDOW_KEEPRATIO);
-	out.open("out.avi", CV_FOURCC('M', 'J', 'P', 'G'), 15, m.src.size(), true);
+	namedWindow("img1",CV_WINDOW_KEEPRATIO);
 	waitForPalmCover(&m);
 	average(&m);
 	destroyWindow("img1");
@@ -328,12 +327,10 @@ int main(){
 		makeContours(&m, &hg);
 		hg.getFingerNumber(&m);
 		showWindows(m);
-		out << m.src;
-		//imwrite("./images/final_result.jpg",m.src);
-    	if(cv::waitKey(30) == char('q')) break;
+		if(cv::waitKey(30) == char('q')) break;
 	}
 	destroyAllWindows();
 	out.release();
 	m.cap.release();
-    return 0;
+	return 0;
 }
