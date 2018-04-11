@@ -54,6 +54,7 @@ Adafruit_MQTT_Publish pressure_publisher = Adafruit_MQTT_Publish(&mqtt, "plant/t
 Adafruit_MQTT_Publish temperature_publisher = Adafruit_MQTT_Publish(&mqtt, "plant/treeminator/temperature", 0);
 Adafruit_MQTT_Publish humidity_publisher = Adafruit_MQTT_Publish(&mqtt, "plant/treeminator/humidity", 0);
 Adafruit_MQTT_Publish mode_publisher = Adafruit_MQTT_Publish(&mqtt, "plant/treeminator/mode", 0);
+Adafruit_MQTT_Publish give_water_publisher = Adafruit_MQTT_Publish(&mqtt, "plant/treeminator/give-water", 0);
 
 /**
  * Subscribers
@@ -76,7 +77,12 @@ enum system_status {
   manual,
   automatic
 };
+enum watering_status {
+  watering,
+  rest
+};
 int current_system_status = system_status::automatic;
+int current_watering_status = watering_status::rest;
 Bounce system_status_switch = Bounce();
 
 /**
@@ -110,25 +116,27 @@ class watering_system {
   public:
   static int position;
   static void go_to(int value) {
-    // watering_servo.write(value);
     if (value != position) {
       watering_servo.write(value);
-      watering_system::position = value;
-      if (value >= 130) {
+      // if transitioning from watering to not watering, last time water given should be set.
+      if (watering_system::position == 130 && value == 0) {
         last_time_water_given = now();
         EEPROM.put(eeprom_last_time_water_given_address, last_time_water_given);
         EEPROM.commit();
       }
+      watering_system::position = value;
     }
   }
   static void go_to_rest_position() {
-    if (now() - last_time_water_given > 1) {
-      watering_system::go_to(0);
-    }
+    give_water_publisher.publish(0);
+    watering_system::go_to(0);
+    current_watering_status = watering_status::rest;
   }
   static void go_to_watering_position() {
     if (now() - last_time_water_given > 5) {
+      give_water_publisher.publish(130);
       watering_system::go_to(130);
+      current_watering_status = watering_status::watering;
     }
   }
   static void has_enough_water(int moisture_level) {
@@ -136,11 +144,9 @@ class watering_system {
     if (current_system_status != system_status::automatic) {
       return;
     }
-    if (moisture_level < 80) {
-      Serial.println("Under moisture level...");
+    if (moisture_level < 110) {
       watering_system::go_to_watering_position();
     } else {
-      Serial.println("Above moisture level...");
       watering_system::go_to_rest_position();
     }
   }
@@ -164,8 +170,9 @@ class soil_moisture_sensor {
 
     for(int i = 0; i <= total_readings; i++) {
       total += soil_moisture_sensor::read_once();
-      delay(10);
     }
+    // turn off soil moisture sensor when done reading
+    digitalWrite(PIN_MULTIPLEXER, LOW);
     watering_system::has_enough_water(total / total_readings);
     return total / total_readings;
   }
@@ -211,7 +218,7 @@ class outside_connection {
     Serial.println(WLAN_SSID);
     WiFi.begin(WLAN_SSID, WLAN_PASS);
     while (WiFi.status() != WL_CONNECTED) {
-      delay(500);
+      delay(500); // DELAY IN EXAMPLE VAN LIBRARY
       Serial.print(".");
     }
     Serial.println();
@@ -235,7 +242,7 @@ class outside_connection {
         Serial.println(mqtt.connectErrorString(ret));
         Serial.println("Retrying MQTT connection in 5 seconds...");
         mqtt.disconnect();
-        delay(5000);
+        delay(5000); // DELAY IN EXAMPLE VAN LIBRARY
         retries--;
         if (retries == 0) {
           while (1);
@@ -246,23 +253,22 @@ class outside_connection {
 
   static void check_subscription() {
     Adafruit_MQTT_Subscribe *subscription;
-    while ((subscription = mqtt.readSubscription(50))) {
-      if (subscription == &button_subscriber) {
-        watering_system::go_to(String((char *)button_subscriber.lastread).toInt());
+    subscription = mqtt.readSubscription();
+    if (subscription == &button_subscriber) {
+      watering_system::go_to(String((char *)button_subscriber.lastread).toInt());
+    }
+    if (subscription == &gesture_subscriber) {
+      Serial.println("Recieved a gesture of finger count");
+      int finger_count = ((char *)gesture_subscriber.lastread)[10] - '0';
+      if (finger_count == 2) {
+        watering_system::go_to_watering_position();
+      } else {
+        watering_system::go_to_rest_position();
       }
-      if (subscription == &gesture_subscriber) {
-        Serial.println("Recieved a gesture of finger count");
-        int finger_count = ((char *)gesture_subscriber.lastread)[10] - '0';
-        if (finger_count == 2) {
-          watering_system::go_to_watering_position();
-        } else {
-          watering_system::go_to_rest_position();
-        }
-      }
-      if (subscription == &renew_sensor_values_subscriber) {
-        Serial.println("Renewing sensor values on command");
-        outside_connection::publish_sensor_values();
-      }
+    }
+    if (subscription == &renew_sensor_values_subscriber) {
+      Serial.println("Renewing sensor values on command");
+      outside_connection::publish_sensor_values();
     }
   }
 
@@ -290,32 +296,46 @@ class outside_connection {
  * UI frames
  */
 void screen_test1(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y) {
-  display->setTextAlignment(TEXT_ALIGN_LEFT);
-  display->setFont(ArialMT_Plain_10);
-  display->drawString(15 + 5 + x, 0 + y,   "moisture:");
-  display->drawString(15 + 75 + x, 0 + y,  String(global_soil_moisture));
-  display->drawString(15 + 5 + x, 10 + y,  "light:");
-  display->drawString(15 + 75 + x, 10 + y, String(global_light));
-  display->drawString(15 + 5 + x, 20 + y,  "pressure:");
-  display->drawString(15 + 75 + x, 20 + y, String(global_pressure));
-  display->drawString(15 + 5 + x, 30 + y,  "temperature:");
-  display->drawString(15 + 75 + x, 30 + y, String(global_temperature));
-  display->drawString(15 + 5 + x, 40 + y,  "humidity:");
-  display->drawString(15 + 75 + x, 40 + y, String(global_humidity));
+  if (current_watering_status == watering_status::rest) {
+    display->setTextAlignment(TEXT_ALIGN_LEFT);
+    display->setFont(ArialMT_Plain_10);
+    display->drawString(15 + 5 + x, 0 + y,   "moisture:");
+    display->drawString(15 + 75 + x, 0 + y,  String(global_soil_moisture));
+    display->drawString(15 + 5 + x, 10 + y,  "light:");
+    display->drawString(15 + 75 + x, 10 + y, String(global_light));
+    display->drawString(15 + 5 + x, 20 + y,  "pressure:");
+    display->drawString(15 + 75 + x, 20 + y, String(global_pressure));
+    display->drawString(15 + 5 + x, 30 + y,  "temperature:");
+    display->drawString(15 + 75 + x, 30 + y, String(global_temperature));
+    display->drawString(15 + 5 + x, 40 + y,  "humidity:");
+    display->drawString(15 + 75 + x, 40 + y, String(global_humidity));
+  } else {
+    display->setTextAlignment(TEXT_ALIGN_CENTER);
+    display->setFont(ArialMT_Plain_10);
+    display->drawString(64 + x, 20 + y, "watering plant...");
+    display->drawString(64 + x, 32 + y, "moisture level: " + String(global_soil_moisture));
+  }
 }
 void screen_test2(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y) {
-  display->setTextAlignment(TEXT_ALIGN_CENTER);
-  display->setFont(ArialMT_Plain_10);
-  time_passed_since_last_time_water_given = now() - last_time_water_given;
-  display->drawString(64 + x, 8 + y, "time passed");
-  display->drawString(64 + x, 18 + y, "since last watering:");
-  int i_hour = hour(time_passed_since_last_time_water_given);
-  String s_hour = (i_hour < 10) ? "0" + String(i_hour) : String(i_hour);
-  int i_minute = minute(time_passed_since_last_time_water_given);
-  String s_minute = (i_minute < 10) ? "0" + String(i_minute) : String(i_minute);
-  int i_second = second(time_passed_since_last_time_water_given);
-  String s_second = (i_second < 10) ? "0" + String(i_second) : String(i_second);
-  display->drawString(64 + x, 36 + y, s_hour + ":" + s_minute + ":" + s_second);
+  if (current_watering_status == watering_status::rest) {
+    display->setTextAlignment(TEXT_ALIGN_CENTER);
+    display->setFont(ArialMT_Plain_10);
+    time_passed_since_last_time_water_given = now() - last_time_water_given;
+    display->drawString(64 + x, 8 + y, "time passed");
+    display->drawString(64 + x, 18 + y, "since last watering:");
+    int i_hour = hour(time_passed_since_last_time_water_given);
+    String s_hour = (i_hour < 10) ? "0" + String(i_hour) : String(i_hour);
+    int i_minute = minute(time_passed_since_last_time_water_given);
+    String s_minute = (i_minute < 10) ? "0" + String(i_minute) : String(i_minute);
+    int i_second = second(time_passed_since_last_time_water_given);
+    String s_second = (i_second < 10) ? "0" + String(i_second) : String(i_second);
+    display->drawString(64 + x, 36 + y, s_hour + ":" + s_minute + ":" + s_second);
+  } else {
+    display->setTextAlignment(TEXT_ALIGN_CENTER);
+    display->setFont(ArialMT_Plain_10);
+    display->drawString(64 + x, 20 + y, "watering plant...");
+    display->drawString(64 + x, 32 + y, "moisture level: " + String(global_soil_moisture));
+  }
 }
 FrameCallback frames[] = { screen_test1, screen_test2 };
 int frames_length = 2;
@@ -358,8 +378,8 @@ void setup() {
   ssd1306_oled_display_ui.setIndicatorDirection(LEFT_RIGHT);
   ssd1306_oled_display_ui.setFrameAnimation(SLIDE_LEFT);
   ssd1306_oled_display_ui.setFrames(frames, frames_length);
-  ssd1306_oled_display_ui.setTimePerFrame(2000);
-  ssd1306_oled_display_ui.setTimePerTransition(0);
+  ssd1306_oled_display_ui.setTimePerFrame(3000);
+  ssd1306_oled_display_ui.setTimePerTransition(1000);
   ssd1306_oled_display_ui.enableAutoTransition();
   ssd1306_oled_display_ui.init();
   ssd1306_oled_display.flipScreenVertically();
